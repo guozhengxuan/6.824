@@ -1,10 +1,13 @@
 package mr
 
-import "fmt"
+import (
+	"fmt"
+	"io/ioutil"
+	"os"
+)
 import "log"
 import "net/rpc"
 import "hash/fnv"
-
 
 //
 // Map functions return a slice of KeyValue.
@@ -24,7 +27,6 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
-
 //
 // main/mrworker.go calls this function.
 //
@@ -36,6 +38,43 @@ func Worker(mapf func(string, string) []KeyValue,
 	// uncomment to send the Example RPC to the coordinator.
 	// CallExample()
 
+}
+
+func CallDispatch() Task {
+	args := EmptyArgs{}
+	var reply *Task
+
+	call("Coordinator.Dispatch", &args, &reply)
+	fn := reply
+
+	file, err := os.Open(fn)
+	if err != nil {
+		log.Fatalf("cannot open %v", fn)
+	}
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		log.Fatalf("cannot read %v", fn)
+	}
+	file.Close()
+
+}
+
+func CallAllMapDone() bool {
+	args := EmptyArgs{}
+	reply := JobDoneReply{}
+
+	call("Coordinator.AllMapDone", &args, &reply)
+
+	return reply.ok
+}
+
+func CallMarkMapDone(fn string) {
+	args := FilenameArgs{
+		fn,
+	}
+	reply := EmptyReply{}
+
+	call("Coordinator.MarkMapDone", &args, &reply)
 }
 
 //

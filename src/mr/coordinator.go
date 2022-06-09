@@ -1,18 +1,77 @@
 package mr
 
-import "log"
+import (
+	"log"
+	"time"
+)
 import "net"
 import "os"
 import "net/rpc"
 import "net/http"
 
-
 type Coordinator struct {
 	// Your definitions here.
+	tasks  chan Task
+	done   map[Task]chan struct{}
+	issued map[Task]chan struct{}
+}
 
+type Task string
+
+func (c *Coordinator) Init() {
+	c.tasks = make(chan Task)
+	c.done = make(map[Task]chan struct{})
+	c.issued = make(map[Task]chan struct{})
 }
 
 // Your code here -- RPC handlers for the worker to call.
+func (c *Coordinator) Schedule(files []string, nReduce int) {
+	// Load map tasks
+	for _, file := range files {
+		task := Task(file)
+		c.tasks <- task
+		c.done[task] = make(chan struct{})
+		c.issued[task] = make(chan struct{})
+	}
+
+	// Wait for map tasks to be done
+	for task := range c.done {
+		task := task
+		go func() {
+		dispatch:
+			<-c.issued[task]
+			select {
+			case <-c.done[task]:
+				close(c.done[task])
+			case <-time.After(10 * time.Second):
+				c.tasks <- task
+				goto dispatch
+			}
+		}()
+	}
+
+	// Set up for reduce tasks
+}
+
+func (c *Coordinator) Dispatch(args *EmptyArgs, reply *Task) error {
+	task := <-c.tasks
+	reply = &task
+	c.issued[task] <- struct{}{}
+	return nil
+}
+
+func (c *Coordinator) MapDone(args *Task, reply *EmptyReply) error {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Println(err)
+		}
+	}()
+
+	task := args
+	c.done[*task] <- struct{}{}
+
+	return nil
+}
 
 //
 // an example RPC handler.
@@ -23,7 +82,6 @@ func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
 	reply.Y = args.X + 1
 	return nil
 }
-
 
 //
 // start a thread that listens for RPCs from worker.go
@@ -50,7 +108,6 @@ func (c *Coordinator) Done() bool {
 
 	// Your code here.
 
-
 	return ret
 }
 
@@ -63,7 +120,6 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 
 	// Your code here.
-
 
 	c.server()
 	return &c
