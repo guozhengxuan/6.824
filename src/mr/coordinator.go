@@ -11,24 +11,36 @@ import "net/http"
 
 type Coordinator struct {
 	// Your definitions here.
+	files   []string
+	nReduce int
+
 	tasks  chan Task
 	done   map[Task]chan struct{}
 	issued map[Task]chan struct{}
 }
 
-type Task string
+type Task struct {
+	fn string
+	id int
+}
 
-func (c *Coordinator) Init() {
-	c.tasks = make(chan Task)
+func (c *Coordinator) Init(files []string, nReduce int) {
+	c.files = files
+	c.nReduce = nReduce
+
+	c.tasks = make(chan Task, len(files))
 	c.done = make(map[Task]chan struct{})
 	c.issued = make(map[Task]chan struct{})
 }
 
 // Your code here -- RPC handlers for the worker to call.
-func (c *Coordinator) Schedule(files []string, nReduce int) {
+func (c *Coordinator) Schedule() {
 	// Load map tasks
-	for _, file := range files {
-		task := Task(file)
+	for i, fn := range c.files {
+		task := Task{
+			fn: fn,
+			id: i,
+		}
 		c.tasks <- task
 		c.done[task] = make(chan struct{})
 		c.issued[task] = make(chan struct{})
@@ -53,22 +65,31 @@ func (c *Coordinator) Schedule(files []string, nReduce int) {
 	// Set up for reduce tasks
 }
 
-func (c *Coordinator) Dispatch(args *EmptyArgs, reply *Task) error {
+func (c *Coordinator) Dispatch(args *EmptyArgs, reply *DispatchReply) error {
+	defer func() {
+		if err := recover(); err != nil {
+			log.Println("All map tasks have been issued")
+		}
+	}()
+
 	task := <-c.tasks
-	reply = &task
+	reply = &DispatchReply{
+		task:    task,
+		nReduce: c.nReduce,
+	}
 	c.issued[task] <- struct{}{}
 	return nil
 }
 
-func (c *Coordinator) MapDone(args *Task, reply *EmptyReply) error {
+func (c *Coordinator) MapDone(args *MapDoneArgs, reply *EmptyReply) error {
 	defer func() {
 		if err := recover(); err != nil {
-			log.Println(err)
+			log.Printf("Map task of file %v already done", args)
 		}
 	}()
 
-	task := args
-	c.done[*task] <- struct{}{}
+	os.Rename(args.tempFn)
+	c.done[args.task] <- struct{}{}
 
 	return nil
 }

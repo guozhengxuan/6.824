@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"os"
+	"strconv"
 )
 import "log"
 import "net/rpc"
@@ -34,47 +35,62 @@ func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
 	// Your worker implementation here.
+	for {
+		dispatchReply := CallDispatch()
+		if dispatchReply == nil {
+			break
+		}
+		task := dispatchReply.task
+		nReduce := dispatchReply.nReduce
+		filename := task.fn
+		var intermediate []KeyValue
+
+		file, err := os.Open(filename)
+		if err != nil {
+			log.Fatalf("cannot open %v", filename)
+		}
+		content, err := ioutil.ReadAll(file)
+		if err != nil {
+			log.Fatalf("cannot read %v", filename)
+		}
+		file.Close()
+
+		kva := mapf(filename, string(content))
+		intermediate = append(intermediate, kva...)
+
+		// Write kvs to intermediate files
+		for i := 0; i < nReduce; i++ {
+
+		}
+
+		temp, err := ioutil.TempFile("", "mr_"+strconv.Itoa(task.id)+"*")
+		if err != nil {
+			log.Fatalf("Can not write intermediate files: %v", err)
+		}
+		temp.Close()
+		mapDoneArgs := MapDoneArgs{
+			task:   *task,
+			tempFn: temp.Name(),
+		}
+		CallMapDone(mapDoneArgs)
+	}
 
 	// uncomment to send the Example RPC to the coordinator.
 	// CallExample()
 
 }
 
-func CallDispatch() Task {
+func CallDispatch() *DispatchReply {
 	args := EmptyArgs{}
-	var reply *Task
+	var reply *DispatchReply
 
 	call("Coordinator.Dispatch", &args, &reply)
-	fn := reply
-
-	file, err := os.Open(fn)
-	if err != nil {
-		log.Fatalf("cannot open %v", fn)
-	}
-	content, err := ioutil.ReadAll(file)
-	if err != nil {
-		log.Fatalf("cannot read %v", fn)
-	}
-	file.Close()
-
+	return reply
 }
 
-func CallAllMapDone() bool {
-	args := EmptyArgs{}
-	reply := JobDoneReply{}
-
-	call("Coordinator.AllMapDone", &args, &reply)
-
-	return reply.ok
-}
-
-func CallMarkMapDone(fn string) {
-	args := FilenameArgs{
-		fn,
-	}
+func CallMapDone(args MapDoneArgs) {
 	reply := EmptyReply{}
-
-	call("Coordinator.MarkMapDone", &args, &reply)
+	call("Coordinator.MapDone", &args, &reply)
 }
 
 //
